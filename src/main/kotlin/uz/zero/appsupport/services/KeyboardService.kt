@@ -13,7 +13,7 @@ import uz.zero.appsupport.OperatorState
 class KeyboardService {
 
     fun languageSelectionMenu(selectedCodes: Set<String>): InlineKeyboardMarkup {
-        
+
         val rows = mutableListOf<InlineKeyboardRow>()
 
         val languages = mapOf("UZ" to "O'zbek tili", "RU" to "Русский язык", "EN" to "English")
@@ -27,7 +27,7 @@ class KeyboardService {
                 .callbackData("LANG_$code")
                 .build()
 
-            
+
             rows.add(InlineKeyboardRow(button))
         }
 
@@ -63,26 +63,26 @@ class KeyboardService {
             .build()
     }
 
-    
+
     fun operatorMenu(state: OperatorState, hasActiveChat: Boolean = false): ReplyKeyboardMarkup {
         val keyboard = mutableListOf<KeyboardRow>()
 
         when {
-            
+
             state == OperatorState.OFFLINE -> {
                 val row = KeyboardRow()
                 row.add(KeyboardButton("🚀 Ishni boshlash (Online)"))
                 keyboard.add(row)
             }
 
-            
+
             hasActiveChat || state == OperatorState.BUSY -> {
                 val row = KeyboardRow()
                 row.add(KeyboardButton("❌ Suhbatni yakunlash"))
                 keyboard.add(row)
             }
 
-            
+
             state == OperatorState.ONLINE -> {
                 val row1 = KeyboardRow()
                 row1.add(KeyboardButton("⏭ Keyingi mijoz"))
@@ -132,6 +132,33 @@ class KeyboardService {
         row.add(KeyboardButton("❌ Suhbatni yakunlash"))
         return ReplyKeyboardMarkup.builder()
             .keyboard(listOf(row))
+            .resizeKeyboard(true)
+            .build()
+    }
+
+    fun ratingMenu(chatId: Long): InlineKeyboardMarkup {
+        val row = InlineKeyboardRow()
+
+
+        for (i in 1..5) {
+            row.add(
+                InlineKeyboardButton.builder()
+                    .text("$i ⭐")
+                    .callbackData("RATE_${chatId}_$i")
+                    .build()
+            )
+        }
+
+        return InlineKeyboardMarkup.builder().keyboard(listOf(row)).build()
+    }
+
+    fun adminMenu(): ReplyKeyboardMarkup {
+        val row1 = KeyboardRow().apply {
+            add("🏆 Operatorlar reytingi")
+            add("💬 Oxirgi baholashlar")
+        }
+        return ReplyKeyboardMarkup.builder()
+            .keyboard(listOf(row1))
             .resizeKeyboard(true)
             .build()
     }

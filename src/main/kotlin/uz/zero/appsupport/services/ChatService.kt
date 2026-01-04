@@ -8,7 +8,7 @@ import java.util.*
 interface ChatService {
     fun startSupportRequest(user: User): String
     fun handleIncomingMessage(sender: User, text: String, telegramMsgId: Long): Long?
-    fun endChat(user: User): Long?
+    fun endChat(user: User): Map<String, Any?>
     fun tryConnectWaitingUsers()
     fun connectToOperator(user: User, firstMessage: String): Long?
     fun checkWaitingQueueAndConnect(operator: User): Chat?
@@ -26,7 +26,7 @@ class ChatServiceImpl(
 
     @Transactional
     override fun startSupportRequest(user: User): String {
-        
+
         val hasActiveChat = chatRepository.existsByUserAndStatusInAndDeletedFalse(
             user, listOf(ChatStatus.ACTIVE, ChatStatus.WAITING)
         )
@@ -37,35 +37,35 @@ class ChatServiceImpl(
 
     @Transactional
     override fun checkWaitingQueueAndConnect(operator: User): Chat? {
-        
+
         val operatorLangCodes = operatorLanguageRepository.findAllByOperator(operator)
             .map { it.language.code }
 
-        
+
         if (operatorLangCodes.isEmpty()) return null
 
-        
-        
+
         val waitingUser = waitingUserRepository.findFirstInQueue(operatorLangCodes).orElse(null)
-            ?: return null 
+            ?: return null
 
-        
-        val chat = chatRepository.save(Chat(
-            user = waitingUser.user,
-            operator = operator,
-            language = waitingUser.language,
-            status = ChatStatus.ACTIVE,
-            startedAt = Date()
-        ))
 
-        
+        val chat = chatRepository.save(
+            Chat(
+                user = waitingUser.user,
+                operator = operator,
+                language = waitingUser.language,
+                status = ChatStatus.ACTIVE,
+                startedAt = Date()
+            )
+        )
+
+
         operatorStatusRepository.findByOperator(operator)?.let {
             it.status = OperatorState.BUSY
-            it.modifiedDate = Date() 
+            it.modifiedDate = Date()
             operatorStatusRepository.save(it)
         }
 
-        
         waitingUser.deleted = true
         waitingUserRepository.save(waitingUser)
 
@@ -73,36 +73,53 @@ class ChatServiceImpl(
     }
 
     @Transactional
-    override fun endChat(user: User): Long? {
-        val chat = chatRepository.findActiveChatByParticipant(user).orElse(null) ?: return null
+    override fun endChat(user: User): Map<String, Any?> {
+
+        val chat = chatRepository.findActiveChatByParticipant(user).orElse(null)
+            ?: return emptyMap()
+
 
         chat.status = ChatStatus.ENDED
         chat.endedAt = Date()
         chatRepository.save(chat)
 
-        val operatorStatus = operatorStatusRepository.findByOperator(chat.operator)
-        operatorStatus?.let {
+
+        operatorStatusRepository.findByOperator(chat.operator)?.let {
             it.status = OperatorState.ONLINE
             it.modifiedDate = Date()
             operatorStatusRepository.save(it)
         }
 
-        
-        return if (user.id == chat.user.id) chat.operator.telegramId else chat.user.telegramId
+
+        val receiverTelegramId = if (user.id == chat.user.id) {
+            chat.operator.telegramId
+        } else {
+            chat.user.telegramId
+        }
+
+        return mapOf(
+            "chat" to chat,
+            "chatId" to chat.id,
+            "userTelegramId" to chat.user.telegramId,
+            "operatorTelegramId" to chat.operator.telegramId,
+            "receiverTelegramId" to receiverTelegramId
+        )
     }
 
     @Transactional
     override fun handleIncomingMessage(sender: User, text: String, telegramMsgId: Long): Long? {
-        
+
         val chat = chatRepository.findActiveChatByParticipant(sender).orElse(null) ?: return null
 
-        messageRepository.save(Message(
-            session = chat,
-            sender = sender,
-            content = text,
-            telegramMessageId = telegramMsgId,
-            messageType = MessageType.TEXT
-        ))
+        messageRepository.save(
+            Message(
+                session = chat,
+                sender = sender,
+                content = text,
+                telegramMessageId = telegramMsgId,
+                messageType = MessageType.TEXT
+            )
+        )
 
         return if (sender.role == UserRole.USER) chat.operator.telegramId else chat.user.telegramId
     }
@@ -119,13 +136,15 @@ class ChatServiceImpl(
             return null
         }
 
-        val chat = chatRepository.save(Chat(
-            user = user,
-            operator = operatorStatus.operator,
-            language = userLang,
-            status = ChatStatus.ACTIVE,
-            startedAt = Date()
-        ))
+        val chat = chatRepository.save(
+            Chat(
+                user = user,
+                operator = operatorStatus.operator,
+                language = userLang,
+                status = ChatStatus.ACTIVE,
+                startedAt = Date()
+            )
+        )
 
         operatorStatus.status = OperatorState.BUSY
         operatorStatusRepository.save(operatorStatus)
@@ -137,31 +156,34 @@ class ChatServiceImpl(
     override fun connectSpecificOperatorWithQueue(operator: User, langCodes: List<LanguageCode>): Chat? {
         if (langCodes.isEmpty()) return null
 
-        
+
         val waitingUser = waitingUserRepository.findFirstInQueue(langCodes).orElse(null)
             ?: return null
 
-        
-        val chat = chatRepository.save(Chat(
-            user = waitingUser.user,
-            operator = operator,
-            language = waitingUser.language,
-            status = ChatStatus.ACTIVE,
-            startedAt = Date()
-        ))
 
-        
+        val chat = chatRepository.save(
+            Chat(
+                user = waitingUser.user,
+                operator = operator,
+                language = waitingUser.language,
+                status = ChatStatus.ACTIVE,
+                startedAt = Date()
+            )
+        )
+
+
         operatorStatusRepository.findByOperator(operator)?.let {
             it.status = OperatorState.BUSY
             operatorStatusRepository.save(it)
         }
 
-        
+
         waitingUser.deleted = true
         waitingUserRepository.save(waitingUser)
 
         return chat
     }
 
-    override fun tryConnectWaitingUsers() { /* Zarur bo'lsa implement qilinadi */ }
+    override fun tryConnectWaitingUsers() { /* Zarur bo'lsa implement qilinadi */
+    }
 }

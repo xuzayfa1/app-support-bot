@@ -23,3 +23,6 @@ spring:
 
 bot:
   token: "8232995551:AAFyodhFcsvrruO6jv2ZP_WqjhkE5TH6SPg"
+admin:
+  api:
+    secret-key: "SecretKey123"

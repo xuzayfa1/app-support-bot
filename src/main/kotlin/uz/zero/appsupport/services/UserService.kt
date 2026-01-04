@@ -12,6 +12,7 @@ interface UserService {
     fun updatePhoneNumber(user: User, phoneNumber: String)
     fun saveUserLanguages(telegramId: Long, langCodes: Set<String>)
     fun promoteToOperator(telegramId: Long): String
+    fun updateUserRole(telegramId: Long, newRole: UserRole): String
 }
 
 
@@ -79,5 +80,23 @@ class UserServiceImpl(
         }
 
         return "Foydalanuvchi muvaffaqiyatli operator qilindi!"
+    }
+
+    @Transactional
+    override fun updateUserRole(telegramId: Long, newRole: UserRole): String {
+        val user = userRepository.findByTelegramId(telegramId)
+            ?: return "Xato: Foydalanuvchi topilmadi (ID: $telegramId)"
+
+        user.role = newRole
+        userRepository.save(user)
+
+        if (newRole == UserRole.OPERATOR) {
+            val existingStatus = operatorStatusRepository.findByOperator(user)
+            if (existingStatus == null) {
+                operatorStatusRepository.save(OperatorStatus(operator = user, status = OperatorState.OFFLINE))
+            }
+        }
+
+        return "Muvaffaqiyatli: ${user.firstName} endi $newRole rolida."
     }
 }

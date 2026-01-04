@@ -81,6 +81,8 @@ interface OperatorStatusRepository : BaseRepository<OperatorStatus> {
     fun findAvailableOperator(@Param("userLangCode") userLangCode: LanguageCode): OperatorStatus?
 
     fun findByOperator(operator: User): OperatorStatus?
+
+    fun countByStatus(status: OperatorState): Long
 }
 
 
@@ -97,6 +99,8 @@ interface ChatRepository : BaseRepository<Chat> {
         operator: User,
         statuses: Collection<ChatStatus>
     ): Chat?
+
+    fun countByStatus(status: ChatStatus): Long
 
 
     fun existsByUserAndStatusInAndDeletedFalse(
@@ -156,10 +160,17 @@ interface MessageRepository : BaseRepository<Message> {
 
 interface OperatorLanguageRepository : BaseRepository<OperatorLanguage> {
 
-
-    fun deleteByOperator(operator: User)
-
-
     fun findAllByOperator(operator: User): List<OperatorLanguage>
 }
 
+
+interface OperatorStatisticsRepository : BaseRepository<OperatorStatistics> {
+    fun findByOperator(operator: User): OperatorStatistics?
+    fun findAllByOrderByAverageRatingDesc(): List<OperatorStatistics>
+}
+
+interface ChatRatingRepository : BaseRepository<ChatRating> {
+
+
+    fun findTop10ByOrderByRatedAtDesc(): List<ChatRating>
+}

@@ -12,144 +12,39 @@ import org.telegram.telegrambots.meta.api.objects.Update
 import org.telegram.telegrambots.meta.api.objects.replykeyboard.InlineKeyboardMarkup
 import org.telegram.telegrambots.meta.api.objects.replykeyboard.ReplyKeyboard
 import org.telegram.telegrambots.meta.generics.TelegramClient
-import uz.zero.appsupport.services.ChatService
-import uz.zero.appsupport.services.KeyboardService
-import uz.zero.appsupport.services.OperatorService
-import uz.zero.appsupport.services.UserService
+import uz.zero.appsupport.services.*
 
 @Component
 class SupportBot(
     @Value("\${bot.token}") private val botToken: String,
     private val userService: UserService,
+    private val ratingService: RatingService,
     private val chatService: ChatService,
     private val operatorService: OperatorService,
     private val keyboardService: KeyboardService,
     private val chatRepository: ChatRepository,
     private val messageRepository: MessageRepository,
+    private val userRepository: UserRepository,
     private val operatorStatusRepository: OperatorStatusRepository,
-    private val operatorLanguageRepository: OperatorLanguageRepository
+    private val operatorLanguageRepository: OperatorLanguageRepository,
+    private val operatorStatisticsRepository: OperatorStatisticsRepository,
+    private val chatRatingRepository: ChatRatingRepository
 ) : SpringLongPollingBot {
 
     private val telegramClient: TelegramClient = OkHttpTelegramClient(botToken)
-
     override fun getBotToken(): String = botToken
-
     private val tempSelectedLangs = mutableMapOf<Long, MutableSet<String>>()
 
     override fun getUpdatesConsumer() = LongPollingUpdateConsumer { updates ->
         updates.forEach { update ->
-            if (update.hasCallbackQuery()) {
-                handleCallback(update)
-            } else if (update.hasMessage()) {
-                handleUpdate(update)
+            try {
+                if (update.hasCallbackQuery()) handleCallback(update)
+                else if (update.hasMessage()) handleUpdate(update)
+            } catch (e: Exception) {
+                e.printStackTrace()
             }
         }
     }
-
-    private fun handleCallback(update: Update) {
-        val callback = update.callbackQuery
-        val data = callback.data
-        val userId = callback.from.id
-        val chatId = callback.message.chatId
-        val messageId = callback.message.messageId
-
-        val user = userService.findByTelegramId(userId) ?: return
-
-        try {
-            when {
-
-                data.startsWith("OP_LANG_") -> {
-                    val code = data.substringAfter("OP_LANG_")
-                    val selected = tempSelectedLangs.getOrPut(userId) { mutableSetOf() }
-
-                    if (selected.contains(code)) selected.remove(code) else selected.add(code)
-
-
-                    editMenu(chatId, messageId, keyboardService.operatorLanguageMenu(selected))
-                }
-
-
-                data == "OP_CONFIRM_LANG" -> {
-                    val selectedStrings = tempSelectedLangs[userId]
-
-                    if (selectedStrings.isNullOrEmpty()) {
-                        send(chatId, "⚠️ Iltimos, kamida bitta tilni tanlang!")
-                    } else {
-
-                        operatorService.updateOperatorLanguages(user, selectedStrings)
-
-                        operatorService.goOnline(user)
-
-
-                        val langCodes = selectedStrings.mapNotNull { str ->
-                            try {
-                                LanguageCode.valueOf(str.uppercase().trim())
-                            } catch (e: Exception) {
-                                null
-                            }
-                        }
-
-
-                        val activeChat = chatService.connectSpecificOperatorWithQueue(user, langCodes)
-
-
-                        editMenu(chatId, messageId, InlineKeyboardMarkup.builder().keyboard(emptyList()).build())
-
-                        if (activeChat != null) {
-                            send(
-                                chatId, "✅ Onlinedasiz va yangi mijozga ulandingiz!",
-                                keyboardService.operatorMenu(OperatorState.BUSY, true)
-                            )
-                            send(activeChat.user.telegramId, "🔔 Operator ulandi!", keyboardService.closeChatMenu())
-                        } else {
-                            send(
-                                chatId, "✅ Onlinedasiz. Hozircha navbat bo'sh (mijoz kutilyapti).",
-                                keyboardService.operatorMenu(OperatorState.ONLINE, false)
-                            )
-                        }
-
-
-                        tempSelectedLangs.remove(userId)
-                    }
-                }
-
-
-                data.startsWith("LANG_") -> {
-                    val code = data.substringAfter("LANG_")
-                    val selected = tempSelectedLangs.getOrPut(userId) { mutableSetOf() }
-
-                    if (selected.contains(code)) selected.remove(code) else selected.add(code)
-
-                    editMenu(chatId, messageId, keyboardService.languageSelectionMenu(selected))
-                }
-
-
-                data == "CONFIRM_LANG" -> {
-                    val selected = tempSelectedLangs[userId]
-                    if (selected.isNullOrEmpty()) {
-                        send(chatId, "⚠️ Iltimos, muloqot tilini tanlang!")
-                    } else {
-
-                        editMenu(chatId, messageId, InlineKeyboardMarkup.builder().keyboard(emptyList()).build())
-
-                        userService.saveUserLanguages(userId, selected)
-                        tempSelectedLangs.remove(userId)
-
-                        send(
-                            chatId, "Muvaffaqiyatli saqlandi! Endi operatorga bog'lanish tugmasini bosishingiz mumkin.",
-                            keyboardService.userMenu()
-                        )
-                    }
-                }
-            }
-
-
-        } catch (e: Exception) {
-            e.printStackTrace()
-            send(chatId, "⚠️ Xatolik yuz berdi: ${e.message}")
-        }
-    }
-
 
     private fun handleUpdate(update: Update) {
         val msg = update.message ?: return
@@ -158,152 +53,63 @@ class SupportBot(
         val incomingText = msg.text ?: ""
 
 
-        if (user.role == UserRole.USER) {
-            if (msg.hasContact()) {
-                userService.updatePhoneNumber(user, msg.contact.phoneNumber)
-                send(
-                    chatId,
-                    "Ajoyib! Endi xizmat ko'rsatish tilini tanlang:",
-                    keyboardService.languageSelectionMenu(emptySet())
-                )
-                return
-            }
-            if (user.phoneNumber == null || user.phoneNumber.startsWith("temp_")) {
-                send(
-                    chatId,
-                    "Botdan foydalanish uchun avval telefon raqamingizni yuboring:",
-                    keyboardService.contactMenu()
-                )
-                return
-            }
+        if (user.role == UserRole.USER && msg.hasContact()) {
+            userService.updatePhoneNumber(user, msg.contact.phoneNumber)
+            send(chatId, "Rahmat! Tilni tanlang:", keyboardService.languageSelectionMenu(emptySet()))
+            return
+        }
+
+
+        if (user.role == UserRole.USER && (user.phoneNumber == null || user.phoneNumber!!.startsWith("temp_"))) {
+            send(chatId, "Botdan foydalanish uchun telefon raqamingizni yuboring:", keyboardService.contactMenu())
+            return
         }
 
 
         when (incomingText) {
-            "/start" -> {
-                if (user.role == UserRole.OPERATOR) {
-                    val status = operatorStatusRepository.findByOperator(user)?.status ?: OperatorState.OFFLINE
-                    send(chatId, "Xush kelibsiz, Operator! Holatingiz: $status", keyboardService.operatorMenu(status))
-                } else {
-                    send(chatId, "Xush kelibsiz!", keyboardService.userMenu())
-                }
-                return
+            "/start" -> handleStartCommand(user, chatId)
+            "/admin", "🏠 Admin panel" -> handleAdminPanelCommand(user, chatId)
+            "🏆 Operatorlar reytingi" -> {
+                handleOperatorStats(user, chatId); return
             }
 
-
-            "🚀 Ishni boshlash (Online)", "🟢 Online bo'lish" -> {
-                if (user.role == UserRole.OPERATOR) {
-
-                    val operatorLangs = operatorLanguageRepository.findAllByOperator(user)
-                        .map { it.language.code.name }.toMutableSet()
-
-
-                    tempSelectedLangs[user.telegramId] = operatorLangs
-
-                    send(
-                        chatId, "Qaysi tillarda xizmat ko'rsatasiz? Tillarni belgilab 'Tasdiqlash' tugmasini bosing:",
-                        keyboardService.operatorLanguageMenu(operatorLangs)
-                    )
-                }
-                return
+            "💬 Oxirgi baholashlar" -> {
+                handleRecentRatings(user, chatId); return
             }
 
+            "🚀 Ishni boshlash (Online)", "🟢 Online bo'lish" -> handleGoOnline(user, chatId)
+            "🏁 Ishni yakunlash (Offline)", "🔴 Offline bo'lish" -> handleGoOffline(user, chatId)
+            "⏭ Keyingi mijoz" -> handleNextClient(user, chatId)
+            "❌ Suhbatni yakunlash" -> handleEndChat(user, chatId)
+            "🆘 Operatorga bog'lanish" -> handleConnectToOperator(user, chatId)
+            else -> {
 
-            "🌐 Tilni o'zgartirish" -> {
-                if (user.role == UserRole.OPERATOR) {
-                    val operatorLangs = operatorLanguageRepository.findAllByOperator(user)
-                        .map { it.language.code.name }.toMutableSet()
-                    tempSelectedLangs[user.telegramId] = operatorLangs
-                    send(
-                        chatId,
-                        "Xizmat ko'rsatish tillarini tahrirlang:",
-                        keyboardService.operatorLanguageMenu(operatorLangs)
-                    )
-                } else {
-                    send(chatId, "Muloqot tilini tanlang:", keyboardService.languageSelectionMenu(emptySet()))
-                }
-                return
-            }
-
-
-            "🏁 Ishni yakunlash (Offline)", "🔴 Offline bo'lish" -> {
-                operatorService.goOffline(user)
-                send(chatId, "Siz offlinedasiz (tanaffus).", keyboardService.operatorMenu(OperatorState.OFFLINE))
-                return
-            }
-
-
-            "⏭ Keyingi mijoz" -> {
-                val chat = chatService.checkWaitingQueueAndConnect(user)
-                if (chat != null) {
-                    send(
-                        chatId, "🔔 **Navbatdagi mijoz:** ${chat.user.firstName}",
-                        keyboardService.operatorMenu(OperatorState.BUSY, true)
-                    )
-                    send(chat.user.telegramId, "✅ Operator ulandi!", keyboardService.closeChatMenu())
-                } else {
-                    send(chatId, "Hozircha navbat bo'sh.", keyboardService.operatorMenu(OperatorState.ONLINE, false))
-                }
-                return
-            }
-
-
-            "❌ Suhbatni yakunlash" -> {
-                val receiverId = chatService.endChat(user)
-                if (user.role == UserRole.OPERATOR) {
-                    send(
-                        chatId, "Suhbat yakunlandi ✅. Yangi mijoz olish uchun 'Keyingi mijoz'ni bosing.",
-                        keyboardService.operatorMenu(OperatorState.ONLINE, false)
-                    )
-                    if (receiverId != null) {
-                        send(receiverId, "Suhbat yakunlandi. Rahmat!", keyboardService.userMenu())
-                    }
-                } else {
-                    send(chatId, "Suhbat yakunlandi. Rahmat!", keyboardService.userMenu())
-                    if (receiverId != null) {
-                        send(
-                            receiverId,
-                            "Mijoz suhbatni yakunladi.",
-                            keyboardService.operatorMenu(OperatorState.ONLINE, false)
-                        )
-                    }
-                }
-                return
-            }
-
-
-            "🆘 Operatorga bog'lanish" -> {
-                if (user.role == UserRole.USER) {
-                    val connectedOpId = chatService.connectToOperator(user, "🆘 Yordam so'rovi")
-                    if (connectedOpId != null) {
-                        send(
-                            connectedOpId, "🔔 **Yangi mijoz:** ${user.firstName}",
-                            keyboardService.operatorMenu(OperatorState.BUSY, true)
-                        )
-                        send(chatId, "✅ Operator ulandi!", keyboardService.closeChatMenu())
-                    } else {
-                        send(chatId, "⏳ Hozirda operatorlar band. Navbatga qo'shildingiz.")
-                    }
-                }
-                return
+                handleDefaultMessage(user, msg, incomingText)
             }
         }
 
+    }
 
+    private fun handleDefaultMessage(
+        user: User,
+        msg: org.telegram.telegrambots.meta.api.objects.message.Message,
+        text: String
+    ) {
         val activeChat = chatRepository.findActiveChatByParticipant(user).orElse(null)
         if (activeChat != null) {
-
             handleChatMessage(user, msg, activeChat)
-        } else if (user.role == UserRole.USER && incomingText.isNotBlank()) {
+        } else if (user.role == UserRole.USER && text.isNotBlank() && !text.startsWith("/")) {
 
-            val connectedOpId = chatService.connectToOperator(user, incomingText)
-            if (connectedOpId != null) {
+            val opId = chatService.connectToOperator(user, text)
+            if (opId != null) {
                 send(
-                    connectedOpId,
-                    "🔔 **Yangi mijoz:** ${user.firstName}\n💬 $incomingText",
+                    opId,
+                    "🔔 Yangi mijoz: ${user.firstName}\n💬 $text",
                     keyboardService.operatorMenu(OperatorState.BUSY, true)
                 )
-                send(chatId, "✅ Operator ulandi.", keyboardService.closeChatMenu())
+                send(user.telegramId, "✅ Operator ulandi.", keyboardService.closeChatMenu())
+            } else {
+                send(user.telegramId, "⏳ Hozirda barcha operatorlar band. Navbatga qo'shildingiz.")
             }
         }
     }
@@ -315,47 +121,35 @@ class SupportBot(
     ) {
         val receiverId =
             if (activeChat.user.id == sender.id) activeChat.operator.telegramId else activeChat.user.telegramId
+        var replyToId: Int? = null
 
-
-        var replyToIdOnReceiverSide: Int? = null
         if (msg.replyToMessage != null) {
-            val originalMsg = if (sender.role == UserRole.OPERATOR) {
+            val orig = if (sender.role == UserRole.OPERATOR)
                 messageRepository.findByOperatorMessageId(msg.replyToMessage.messageId.toLong())
-            } else {
+            else
                 messageRepository.findByUserMessageId(msg.replyToMessage.messageId.toLong())
-            }
 
-            replyToIdOnReceiverSide = if (sender.role == UserRole.OPERATOR) {
-                originalMsg?.userMessageId?.toInt()
-            } else {
-                originalMsg?.operatorMessageId?.toInt()
-            }
+            replyToId =
+                if (sender.role == UserRole.OPERATOR) orig?.userMessageId?.toInt() else orig?.operatorMessageId?.toInt()
         }
-
 
         val copy = CopyMessage.builder()
             .chatId(receiverId.toString())
             .fromChatId(sender.telegramId.toString())
             .messageId(msg.messageId)
-            .apply {
-                if (replyToIdOnReceiverSide != null) {
-                    replyToMessageId(replyToIdOnReceiverSide)
-                }
-            }
+            .apply { if (replyToId != null) replyToMessageId(replyToId) }
             .build()
 
         try {
-            val sentMsg = telegramClient.execute(copy)
-
-
+            val sent = telegramClient.execute(copy)
             messageRepository.save(
                 Message(
                     session = activeChat,
                     sender = sender,
                     content = msg.text ?: "[Media]",
                     messageType = MessageType.TEXT,
-                    userMessageId = if (sender.role == UserRole.USER) msg.messageId.toLong() else sentMsg.messageId.toLong(),
-                    operatorMessageId = if (sender.role == UserRole.OPERATOR) msg.messageId.toLong() else sentMsg.messageId.toLong()
+                    userMessageId = if (sender.role == UserRole.USER) msg.messageId.toLong() else sent.messageId.toLong(),
+                    operatorMessageId = if (sender.role == UserRole.OPERATOR) msg.messageId.toLong() else sent.messageId.toLong()
                 )
             )
         } catch (e: Exception) {
@@ -363,35 +157,13 @@ class SupportBot(
         }
     }
 
-    private fun forwardOldMessages(chat: Chat) {
-        val oldMessages = messageRepository.findAllBySenderAndSessionIsNull(chat.user)
-        oldMessages.forEach { msg ->
-            msg.telegramMessageId?.let { msgId ->
-                copyMessage(chat.operator.telegramId, chat.user.telegramId, msgId.toInt())
-                msg.session = chat
-                messageRepository.save(msg)
-            }
-        }
-    }
 
     private fun send(chatId: Long, text: String, keyboard: ReplyKeyboard? = null) {
         val sm = SendMessage(chatId.toString(), text)
+        sm.enableMarkdown(true)
         if (keyboard != null) sm.replyMarkup = keyboard
         try {
             telegramClient.execute(sm)
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
-    }
-
-    private fun copyMessage(toChatId: Long, fromChatId: Long, messageId: Int) {
-        val copy = CopyMessage.builder()
-            .chatId(toChatId.toString())
-            .fromChatId(fromChatId.toString())
-            .messageId(messageId)
-            .build()
-        try {
-            telegramClient.execute(copy)
         } catch (e: Exception) {
             e.printStackTrace()
         }
@@ -406,6 +178,182 @@ class SupportBot(
         try {
             telegramClient.execute(edit)
         } catch (e: Exception) {
+        }
+    }
+
+    private fun handleStartCommand(user: User, chatId: Long) {
+        when (user.role) {
+            UserRole.ADMIN -> send(chatId, "🔐 Salom Admin! Panelga xush kelibsiz.", keyboardService.adminMenu())
+            UserRole.OPERATOR -> {
+                val status = operatorStatusRepository.findByOperator(user)?.status ?: OperatorState.OFFLINE
+                send(chatId, "🎧 Xush kelibsiz, Operator! Holat: $status", keyboardService.operatorMenu(status))
+            }
+
+            else -> send(
+                chatId,
+                "👋 Xush kelibsiz! Botdan foydalanish uchun quyidagilardan birini tanlang:",
+                keyboardService.userMenu()
+            )
+        }
+    }
+
+    private fun handleAdminPanelCommand(user: User, chatId: Long) {
+        if (user.role == UserRole.ADMIN) send(chatId, "⚙️ Admin boshqaruv paneli:", keyboardService.adminMenu())
+    }
+
+
+    private fun handleGoOnline(user: User, chatId: Long) {
+        if (user.role == UserRole.OPERATOR) {
+            val langs = operatorLanguageRepository.findAllByOperator(user).map { it.language.code.name }.toMutableSet()
+            tempSelectedLangs[user.telegramId] = langs
+            send(chatId, "🌐 Tillarni tasdiqlang:", keyboardService.operatorLanguageMenu(langs))
+        }
+    }
+
+    private fun handleGoOffline(user: User, chatId: Long) {
+        if (user.role == UserRole.OPERATOR) {
+            operatorService.goOffline(user)
+            send(chatId, "🔴 Offlinedasiz.", keyboardService.operatorMenu(OperatorState.OFFLINE))
+        }
+    }
+
+    private fun handleNextClient(user: User, chatId: Long) {
+        if (user.role == UserRole.OPERATOR) {
+            val chat = chatService.checkWaitingQueueAndConnect(user)
+            if (chat != null) {
+                send(chatId, "🔔 Mijoz: ${chat.user.firstName}", keyboardService.operatorMenu(OperatorState.BUSY, true))
+                send(chat.user.telegramId, "✅ Operator ulandi!", keyboardService.closeChatMenu())
+            } else send(chatId, "⏳ Navbat bo'sh.", keyboardService.operatorMenu(OperatorState.ONLINE, false))
+        }
+    }
+
+    private fun handleEndChat(user: User, chatId: Long) {
+        val res = chatService.endChat(user)
+        if (res.isEmpty()) return
+        val cId = res["chatId"] as Long
+        val uTid = res["userTelegramId"] as Long
+        val oTid = res["operatorTelegramId"] as Long
+
+        if (user.role == UserRole.OPERATOR) {
+            send(oTid, "✅ Yakunlandi.", keyboardService.operatorMenu(OperatorState.ONLINE, false))
+            send(uTid, "🏁 Baholang:", keyboardService.ratingMenu(cId))
+        } else {
+            send(uTid, "🏁 Rahmat!", keyboardService.ratingMenu(cId))
+            send(oTid, "👤 Mijoz yakunladi.", keyboardService.operatorMenu(OperatorState.ONLINE, false))
+        }
+    }
+
+    private fun handleConnectToOperator(user: User, chatId: Long) {
+        if (user.role == UserRole.USER) {
+            val opId = chatService.connectToOperator(user, "Yordam so'rovi")
+            if (opId != null) {
+                send(opId, "🔔 Yangi mijoz: ${user.firstName}", keyboardService.operatorMenu(OperatorState.BUSY, true))
+                send(chatId, "✅ Operator ulandi.", keyboardService.closeChatMenu())
+            } else send(chatId, "⏳ Navbatga qo'shildingiz.")
+        }
+    }
+
+
+    private fun handleOperatorStats(user: User, chatId: Long) {
+        if (user.role == UserRole.ADMIN) {
+            val stats = operatorStatisticsRepository.findAllByOrderByAverageRatingDesc()
+            if (stats.isEmpty()) {
+                send(chatId, "📭 Hozircha statistikalar mavjud emas.")
+                return
+            }
+            val sb = StringBuilder("🏆 **Operatorlar reytingi:**\n\n")
+            stats.forEach { s ->
+                sb.append(
+                    "👤 ${s.operator.firstName}: ${
+                        String.format(
+                            "%.2f",
+                            s.averageRating
+                        )
+                    } ⭐ (${s.ratingsCount} ta baho)\n"
+                )
+            }
+            send(chatId, sb.toString())
+        }
+    }
+
+
+    private fun handleRecentRatings(user: User, chatId: Long) {
+        if (user.role == UserRole.ADMIN) {
+
+            val ratings = chatRatingRepository.findTop10ByOrderByRatedAtDesc()
+            if (ratings.isEmpty()) {
+                send(chatId, "📭 Hozircha baholar mavjud emas.")
+                return
+            }
+            val sb = StringBuilder("💬 **Oxirgi 10 ta baholash:**\n\n")
+            ratings.forEach { r ->
+                sb.append("⭐ ${r.rating} - ${r.operator.firstName}ga (${r.user.firstName} tomonidan)\n")
+                if (!r.comment.isNullOrBlank()) sb.append("📝 Izoh: ${r.comment}\n")
+                sb.append("────────────────\n")
+            }
+            send(chatId, sb.toString())
+        }
+    }
+
+    private fun handleCallback(update: Update) {
+        val cb = update.callbackQuery
+        val data = cb.data
+        val uid = cb.from.id
+        val cid = cb.message.chatId
+        val mid = cb.message.messageId
+        val user = userService.findByTelegramId(uid) ?: return
+
+        when {
+            data.startsWith("RATE_") -> {
+                val p = data.split("_")
+                chatRepository.findById(p[1].toLong()).ifPresent {
+                    ratingService.rateOperator(it, p[2].toInt(), null)
+                    editMenu(cid, mid, InlineKeyboardMarkup.builder().keyboard(emptyList()).build())
+                    send(cid, "Rahmat! (${p[2]} ⭐)", keyboardService.userMenu())
+                }
+            }
+
+            data.startsWith("OP_LANG_") -> {
+                val code = data.substringAfter("OP_LANG_")
+                val sel = tempSelectedLangs.getOrPut(uid) { mutableSetOf() }
+                if (!sel.remove(code)) sel.add(code)
+                editMenu(cid, mid, keyboardService.operatorLanguageMenu(sel))
+            }
+
+            data == "OP_CONFIRM_LANG" -> {
+                val sel = tempSelectedLangs[uid]
+                if (sel.isNullOrEmpty()) {
+                    send(cid, "⚠️ Tilni tanlang!")
+                } else {
+                    operatorService.updateOperatorLanguages(user, sel)
+                    operatorService.goOnline(user)
+                    val codes = sel.map { LanguageCode.valueOf(it.uppercase()) }
+                    val active = chatService.connectSpecificOperatorWithQueue(user, codes)
+                    editMenu(cid, mid, InlineKeyboardMarkup.builder().keyboard(emptyList()).build())
+                    if (active != null) {
+                        send(cid, "✅ Mijozga ulandingiz!", keyboardService.operatorMenu(OperatorState.BUSY, true))
+                        send(active.user.telegramId, "🔔 Operator ulandi!", keyboardService.closeChatMenu())
+                    } else send(cid, "✅ Onlinedasiz.", keyboardService.operatorMenu(OperatorState.ONLINE, false))
+                    tempSelectedLangs.remove(uid)
+                }
+            }
+
+            data.startsWith("LANG_") -> {
+                val code = data.substringAfter("LANG_")
+                val sel = tempSelectedLangs.getOrPut(uid) { mutableSetOf() }
+                if (!sel.remove(code)) sel.add(code)
+                editMenu(cid, mid, keyboardService.languageSelectionMenu(sel))
+            }
+
+            data == "CONFIRM_LANG" -> {
+                val sel = tempSelectedLangs[uid]
+                if (sel.isNullOrEmpty()) send(cid, "⚠️ Tilni tanlang!") else {
+                    editMenu(cid, mid, InlineKeyboardMarkup.builder().keyboard(emptyList()).build())
+                    userService.saveUserLanguages(uid, sel)
+                    tempSelectedLangs.remove(uid)
+                    send(cid, "Tayyor!", keyboardService.userMenu())
+                }
+            }
         }
     }
 }

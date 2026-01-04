@@ -162,7 +162,7 @@ class ChatRating(
 
 @Entity
 class OperatorStatistics(
-    @ManyToOne(fetch = FetchType.LAZY)
+    @ManyToOne(fetch = FetchType.EAGER)
     var operator: User,
     var averageRating: Double = 0.0,
     var ratingsCount: Long = 0,
