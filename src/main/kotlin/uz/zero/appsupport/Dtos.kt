@@ -6,10 +6,8 @@ data class UserDto(
     val telegramId: Long,
     val firstName: String?,
     val lastName: String?,
-    val username: String?,
     val phoneNumber: String?,
-    val role: UserRole,
-    val languageCode: String
+    val role: UserRole
 )
 
 data class ChatSessionDto(

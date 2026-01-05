@@ -11,15 +11,19 @@ class DataLoader(
 
     override fun run(vararg args: String?) {
 
+
         if (languageRepository.count() == 0L) {
             val languages = listOf(
                 Language(code = LanguageCode.UZ, name = "O'zbekcha"),
                 Language(code = LanguageCode.RU, name = "Русский"),
-                Language(code = LanguageCode.EN, name = "English")
             )
             languageRepository.saveAll(languages)
             println("--- Tillar bazaga yuklandi ---")
         }
+
+
+        val langUz = languageRepository.findByCode(LanguageCode.UZ)
+            ?: throw RuntimeException("O'zbek tili bazadan topilmadi!")
 
 
         val operatorId = 123456789L
@@ -31,7 +35,8 @@ class DataLoader(
                 firstName = "Asosiy",
                 lastName = "Operator",
                 role = UserRole.OPERATOR,
-                selectedLanguage = languageRepository.findByCode(LanguageCode.UZ)
+
+                selectedLanguages = mutableSetOf(langUz)
             )
             userRepository.save(adminOperator)
             println("--- Test operator bazaga yuklandi ---")

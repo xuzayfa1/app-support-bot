@@ -10,6 +10,8 @@ import jakarta.persistence.GeneratedValue
 import jakarta.persistence.GenerationType
 import jakarta.persistence.Id
 import jakarta.persistence.JoinColumn
+import jakarta.persistence.JoinTable
+import jakarta.persistence.ManyToMany
 import jakarta.persistence.ManyToOne
 import jakarta.persistence.MappedSuperclass
 import jakarta.persistence.Table
@@ -21,6 +23,7 @@ import org.springframework.data.annotation.CreatedDate
 import org.springframework.data.annotation.LastModifiedBy
 import org.springframework.data.annotation.LastModifiedDate
 import org.springframework.data.jpa.domain.support.AuditingEntityListener
+import java.time.LocalDateTime
 import java.util.Date
 
 @MappedSuperclass
@@ -51,8 +54,13 @@ class User(
     @Column(nullable = false)
     var role: UserRole,
 
-    @ManyToOne
-    var selectedLanguage: Language? = null
+    @ManyToMany(fetch = FetchType.EAGER)
+    @JoinTable(
+        name = "user_languages",
+        joinColumns = [JoinColumn(name = "user_id")],
+        inverseJoinColumns = [JoinColumn(name = "language_id")]
+    )
+    var selectedLanguages: MutableSet<Language> = mutableSetOf()
 ) : BaseEntity()
 
 
@@ -83,7 +91,9 @@ class OperatorStatus(
 
     @Enumerated(value = EnumType.STRING)
     @Column(nullable = false)
-    var status: OperatorState = OperatorState.OFFLINE
+    var status: OperatorState = OperatorState.OFFLINE,
+
+    var updatedAt: LocalDateTime = LocalDateTime.now()
 ) : BaseEntity()
 
 

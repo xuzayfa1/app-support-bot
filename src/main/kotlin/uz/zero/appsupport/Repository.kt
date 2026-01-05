@@ -73,42 +73,45 @@ interface OperatorStatusRepository : BaseRepository<OperatorStatus> {
     @Query(
         """
     SELECT os FROM OperatorStatus os 
-    JOIN OperatorLanguage ol ON ol.operator = os.operator 
+    JOIN os.operator u 
+    JOIN OperatorLanguage ol ON ol.operator = u 
     WHERE os.status = 'ONLINE' 
     AND ol.language.code = :userLangCode
-"""
+    AND os.deleted = false 
+    AND u.deleted = false
+    ORDER BY os.updatedAt ASC
+    """
     )
     fun findAvailableOperator(@Param("userLangCode") userLangCode: LanguageCode): OperatorStatus?
 
     fun findByOperator(operator: User): OperatorStatus?
-
-    fun countByStatus(status: OperatorState): Long
 }
 
 
 interface ChatRepository : BaseRepository<Chat> {
 
-
+    
     fun findFirstByUserAndStatusInAndDeletedFalse(
         user: User,
         statuses: Collection<ChatStatus>
     ): Chat?
 
-
+    
     fun findFirstByOperatorAndStatusInAndDeletedFalse(
         operator: User,
         statuses: Collection<ChatStatus>
     ): Chat?
 
+    
     fun countByStatus(status: ChatStatus): Long
 
-
+    
     fun existsByUserAndStatusInAndDeletedFalse(
         user: User,
         statuses: Collection<ChatStatus>
     ): Boolean
 
-
+    
     @Query(
         """
         SELECT c FROM Chat c 
@@ -118,6 +121,18 @@ interface ChatRepository : BaseRepository<Chat> {
     """
     )
     fun findActiveChatByParticipant(@Param("person") person: User): Optional<Chat>
+
+    @Query("""
+        SELECT c FROM Chat c 
+        WHERE c.status = :status 
+        AND c.language.code IN :languages 
+        AND c.deleted = false 
+        ORDER BY c.id ASC
+    """)
+    fun findFirstWaitingChatByLanguages(
+        @Param("status") status: ChatStatus,
+        @Param("languages") languages: Collection<LanguageCode>
+    ): Optional<Chat>
 }
 
 

@@ -7,16 +7,17 @@ import org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.InlineKe
 import org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.InlineKeyboardRow
 import org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.KeyboardButton
 import org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.KeyboardRow
+import uz.zero.appsupport.LanguageCode
 import uz.zero.appsupport.OperatorState
 
 @Service
 class KeyboardService {
 
     fun languageSelectionMenu(selectedCodes: Set<String>): InlineKeyboardMarkup {
-
         val rows = mutableListOf<InlineKeyboardRow>()
 
-        val languages = mapOf("UZ" to "O'zbek tili", "RU" to "Русский язык", "EN" to "English")
+
+        val languages = mapOf("UZ" to "O'zbek tili", "RU" to "Русский язык")
 
         languages.forEach { (code, name) ->
             val isSelected = selectedCodes.contains(code)
@@ -27,23 +28,38 @@ class KeyboardService {
                 .callbackData("LANG_$code")
                 .build()
 
-
             rows.add(InlineKeyboardRow(button))
         }
 
+
         val confirmButton = InlineKeyboardButton.builder()
-            .text("✅ Tasdiqlash")
+            .text("✅ Tasdiqlash / Подтвердить")
             .callbackData("CONFIRM_LANG")
             .build()
 
         rows.add(InlineKeyboardRow(confirmButton))
 
-        return InlineKeyboardMarkup.builder().keyboard(rows).build()
+        return InlineKeyboardMarkup.builder()
+            .keyboard(rows)
+            .build()
     }
 
-    fun contactMenu(): ReplyKeyboardMarkup {
+    fun contactMenu(langCode: LanguageCode): ReplyKeyboardMarkup {
         val row = KeyboardRow()
-        row.add(KeyboardButton.builder().text("📱 Telefon raqamni yuborish").requestContact(true).build())
+
+
+        val buttonText = if (langCode == LanguageCode.UZ) {
+            "📱 Telefon raqamni yuborish"
+        } else {
+            "📱 Отправить номер телефона"
+        }
+
+        row.add(
+            KeyboardButton.builder()
+                .text(buttonText)
+                .requestContact(true)
+                .build()
+        )
 
         return ReplyKeyboardMarkup.builder()
             .keyboard(listOf(row))
@@ -52,44 +68,50 @@ class KeyboardService {
             .build()
     }
 
-    fun userMenu(): ReplyKeyboardMarkup {
-        val row = KeyboardRow()
-        row.add(KeyboardButton("🆘 Operatorga bog'lanish"))
-        row.add(KeyboardButton("🌐 Tilni o'zgartirish"))
-
+    fun userMenu(langCode: LanguageCode): ReplyKeyboardMarkup {
+        val row1 = KeyboardRow()
+        if (langCode == LanguageCode.UZ) {
+            row1.add("🆘 Operatorga bog'lanish")
+            row1.add("🌐 Tilni o'zgartirish")
+        } else {
+            row1.add("🆘 Связаться с оператором")
+            row1.add("🌐 Изменить язык")
+        }
         return ReplyKeyboardMarkup.builder()
-            .keyboard(listOf(row))
+            .keyboard(listOf(row1))
             .resizeKeyboard(true)
             .build()
     }
 
 
-    fun operatorMenu(state: OperatorState, hasActiveChat: Boolean = false): ReplyKeyboardMarkup {
+    fun operatorMenu(
+        state: OperatorState,
+        langCode: LanguageCode,
+        hasActiveChat: Boolean = false
+    ): ReplyKeyboardMarkup {
         val keyboard = mutableListOf<KeyboardRow>()
+        val isUz = langCode == LanguageCode.UZ
 
         when {
-
             state == OperatorState.OFFLINE -> {
                 val row = KeyboardRow()
-                row.add(KeyboardButton("🚀 Ishni boshlash (Online)"))
+                row.add(KeyboardButton(if (isUz) "🚀 Ishni boshlash (Online)" else "🚀 Начать работу (Online)"))
                 keyboard.add(row)
             }
-
 
             hasActiveChat || state == OperatorState.BUSY -> {
                 val row = KeyboardRow()
-                row.add(KeyboardButton("❌ Suhbatni yakunlash"))
+                row.add(KeyboardButton(if (isUz) "❌ Suhbatni yakunlash" else "❌ Завершить чат"))
                 keyboard.add(row)
             }
 
-
             state == OperatorState.ONLINE -> {
                 val row1 = KeyboardRow()
-                row1.add(KeyboardButton("⏭ Keyingi mijoz"))
-                row1.add(KeyboardButton("🏁 Ishni yakunlash (Offline)"))
+                row1.add(KeyboardButton(if (isUz) "⏭ Keyingi mijoz" else "⏭ Следующий клиент"))
+                row1.add(KeyboardButton(if (isUz) "🏁 Ishni yakunlash (Offline)" else "🏁 Завершить работу (Offline)"))
 
                 val row2 = KeyboardRow()
-                row2.add(KeyboardButton("🌐 Tilni o'zgartirish"))
+                row2.add(KeyboardButton(if (isUz) "🌐 Tilni o'zgartirish" else "🌐 Изменить язык"))
 
                 keyboard.add(row1)
                 keyboard.add(row2)
@@ -127,12 +149,22 @@ class KeyboardService {
         return InlineKeyboardMarkup.builder().keyboard(rows).build()
     }
 
-    fun closeChatMenu(): ReplyKeyboardMarkup {
+    fun closeChatMenu(langCode: LanguageCode): ReplyKeyboardMarkup {
         val row = KeyboardRow()
-        row.add(KeyboardButton("❌ Suhbatni yakunlash"))
+
+
+        val buttonText = if (langCode == LanguageCode.UZ) {
+            "❌ Suhbatni yakunlash"
+        } else {
+            "❌ Завершить чат"
+        }
+
+        row.add(KeyboardButton(buttonText))
+
         return ReplyKeyboardMarkup.builder()
             .keyboard(listOf(row))
             .resizeKeyboard(true)
+            .oneTimeKeyboard(false)
             .build()
     }
 
@@ -152,10 +184,11 @@ class KeyboardService {
         return InlineKeyboardMarkup.builder().keyboard(listOf(row)).build()
     }
 
-    fun adminMenu(): ReplyKeyboardMarkup {
+    fun adminMenu(langCode: LanguageCode): ReplyKeyboardMarkup {
+        val isUz = langCode == LanguageCode.UZ
         val row1 = KeyboardRow().apply {
-            add("🏆 Operatorlar reytingi")
-            add("💬 Oxirgi baholashlar")
+            add(if (isUz) "🏆 Operatorlar reytingi" else "🏆 Рейтинг операторов")
+            add(if (isUz) "💬 Oxirgi baholashlar" else "💬 Последние оценки")
         }
         return ReplyKeyboardMarkup.builder()
             .keyboard(listOf(row1))

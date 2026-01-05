@@ -3,6 +3,7 @@ package uz.zero.appsupport.services
 import jakarta.transaction.Transactional
 import org.springframework.stereotype.Service
 import uz.zero.appsupport.*
+import java.time.LocalDateTime
 import java.util.*
 
 interface ChatService {
@@ -11,8 +12,9 @@ interface ChatService {
     fun endChat(user: User): Map<String, Any?>
     fun tryConnectWaitingUsers()
     fun connectToOperator(user: User, firstMessage: String): Long?
-    fun checkWaitingQueueAndConnect(operator: User): Chat?
     fun connectSpecificOperatorWithQueue(operator: User, langCodes: List<LanguageCode>): Chat?
+    fun getActiveChat(user: User): Chat?
+    fun checkWaitingQueueAndConnect(operator: User, opKnownLanguages: List<LanguageCode>): Chat?
 }
 
 @Service
@@ -21,7 +23,7 @@ class ChatServiceImpl(
     private val waitingUserRepository: WaitingUserRepository,
     private val operatorStatusRepository: OperatorStatusRepository,
     private val messageRepository: MessageRepository,
-    private val operatorLanguageRepository: OperatorLanguageRepository
+    private val operatorLanguageRepository: OperatorLanguageRepository,
 ) : ChatService {
 
     @Transactional
@@ -36,40 +38,30 @@ class ChatServiceImpl(
     }
 
     @Transactional
-    override fun checkWaitingQueueAndConnect(operator: User): Chat? {
+    override fun checkWaitingQueueAndConnect(operator: User, opKnownLanguages: List<LanguageCode>): Chat? {
 
-        val operatorLangCodes = operatorLanguageRepository.findAllByOperator(operator)
-            .map { it.language.code }
-
-
-        if (operatorLangCodes.isEmpty()) return null
-
-
-        val waitingUser = waitingUserRepository.findFirstInQueue(operatorLangCodes).orElse(null)
-            ?: return null
-
-
-        val chat = chatRepository.save(
-            Chat(
-                user = waitingUser.user,
-                operator = operator,
-                language = waitingUser.language,
-                status = ChatStatus.ACTIVE,
-                startedAt = Date()
-            )
+        val chatOptional = chatRepository.findFirstWaitingChatByLanguages(
+            ChatStatus.WAITING,
+            opKnownLanguages
         )
+
+        if (chatOptional.isEmpty) {
+            return null
+        }
+
+        val chat = chatOptional.get()
+
+
+        chat.operator = operator
+        chat.status = ChatStatus.ACTIVE
 
 
         operatorStatusRepository.findByOperator(operator)?.let {
             it.status = OperatorState.BUSY
-            it.modifiedDate = Date()
             operatorStatusRepository.save(it)
         }
 
-        waitingUser.deleted = true
-        waitingUserRepository.save(waitingUser)
-
-        return chat
+        return chatRepository.save(chat)
     }
 
     @Transactional
@@ -126,27 +118,34 @@ class ChatServiceImpl(
 
     @Transactional
     override fun connectToOperator(user: User, firstMessage: String): Long? {
-        val userLang = user.selectedLanguage ?: return null
-        val operatorStatus = operatorStatusRepository.findAvailableOperator(userLang.code)
+
+        val userLanguage = user.selectedLanguages.firstOrNull() ?: return null
+
+
+        val operatorStatus = operatorStatusRepository.findAvailableOperator(userLanguage.code)
 
         if (operatorStatus == null) {
+
             if (!waitingUserRepository.existsByUserAndDeletedFalse(user)) {
-                waitingUserRepository.save(WaitingUser(user = user, language = userLang))
+                waitingUserRepository.save(WaitingUser(user = user, language = userLanguage))
             }
             return null
         }
 
-        val chat = chatRepository.save(
+
+        chatRepository.save(
             Chat(
                 user = user,
                 operator = operatorStatus.operator,
-                language = userLang,
+                language = userLanguage,
                 status = ChatStatus.ACTIVE,
                 startedAt = Date()
             )
         )
 
+
         operatorStatus.status = OperatorState.BUSY
+        operatorStatus.updatedAt = LocalDateTime.now()
         operatorStatusRepository.save(operatorStatus)
 
         return operatorStatus.operator.telegramId
@@ -154,22 +153,18 @@ class ChatServiceImpl(
 
     @Transactional
     override fun connectSpecificOperatorWithQueue(operator: User, langCodes: List<LanguageCode>): Chat? {
-        if (langCodes.isEmpty()) return null
 
-
-        val waitingUser = waitingUserRepository.findFirstInQueue(langCodes).orElse(null)
-            ?: return null
-
-
-        val chat = chatRepository.save(
-            Chat(
-                user = waitingUser.user,
-                operator = operator,
-                language = waitingUser.language,
-                status = ChatStatus.ACTIVE,
-                startedAt = Date()
-            )
+        val chatOptional = chatRepository.findFirstWaitingChatByLanguages(
+            ChatStatus.WAITING,
+            langCodes
         )
+
+        if (chatOptional.isEmpty) return null
+
+        val chat = chatOptional.get()
+        chat.operator = operator
+        chat.status = ChatStatus.ACTIVE
+        chat.startedAt = Date()
 
 
         operatorStatusRepository.findByOperator(operator)?.let {
@@ -177,13 +172,22 @@ class ChatServiceImpl(
             operatorStatusRepository.save(it)
         }
 
-
-        waitingUser.deleted = true
-        waitingUserRepository.save(waitingUser)
-
-        return chat
+        return chatRepository.save(chat)
     }
 
     override fun tryConnectWaitingUsers() { /* Zarur bo'lsa implement qilinadi */
+    }
+
+    override fun getActiveChat(user: User): Chat? {
+
+
+        return chatRepository.findActiveChatByParticipant(user).orElse(null)
+    }
+
+
+    fun getChatForUser(user: User): Chat? {
+        return chatRepository.findFirstByUserAndStatusInAndDeletedFalse(
+            user, listOf(ChatStatus.ACTIVE)
+        )
     }
 }

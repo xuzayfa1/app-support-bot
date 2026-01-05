@@ -33,3 +33,26 @@ class AdminController(
         }
     }
 }
+
+@RestController
+@RequestMapping("/api/users")
+class UserController(
+    private val userRepository: UserRepository
+) {
+
+    @GetMapping("/all")
+    fun getAllUsers(): List<UserDto> {
+
+        return userRepository.findAll()
+            .filter { !it.deleted }
+            .map { user ->
+                UserDto(
+                    telegramId = user.telegramId,
+                    firstName = user.firstName,
+                    lastName = user.lastName,
+                    phoneNumber = user.phoneNumber,
+                    role = user.role
+                )
+            }
+    }
+}
